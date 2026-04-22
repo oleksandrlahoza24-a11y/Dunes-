@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Dunes</title>
+<title>Realistic Dunes</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -35,7 +35,7 @@
 <canvas id="c"></canvas>
 <div class="corner" id="c1"></div><div class="corner" id="c2"></div>
 <div class="corner" id="c3"></div><div class="corner" id="c4"></div>
-<div id="badge">SiO₂ · GRANULAR</div>
+<div id="badge">SiO₂ · REALISTIC GRANULAR</div>
 <div id="ui">sculpt the dunes</div>
 <script>
 'use strict';
@@ -76,18 +76,13 @@ function canRT(type){
 let FTYPE, ULIN, UINT8;
 if(extFloat && canRT(gl.FLOAT))                       { FTYPE=gl.FLOAT;                ULIN=!!extFL; UINT8=false; }
 else if(extHalfF && canRT(extHalfF.HALF_FLOAT_OES))   { FTYPE=extHalfF.HALF_FLOAT_OES; ULIN=!!extHL; UINT8=false; }
-else                                                   { FTYPE=gl.UNSIGNED_BYTE;        ULIN=true;    UINT8=true;  }
+else                                                  { FTYPE=gl.UNSIGNED_BYTE;        ULIN=true;    UINT8=true;  }
 
-// ─── resolution ───────────────────────────────────────────────────────────────
-const S = 512;
+const S = 512; // Resolution
 
 const VERT = `attribute vec2 aPos; varying vec2 vUV;
 void main(){ vUV = aPos*.5+.5; gl_Position = vec4(aPos,0.,1.); }`;
 
-// ═════════════════════════════════════════════════════════════════════════════
-// INIT SHADER — GPU-generated barchan dune landscape (runs once on startup)
-// Height stored in [0,1] range. R channel (float) or R+G packed (UINT8).
-// ═════════════════════════════════════════════════════════════════════════════
 const INIT_SRC = (UINT8 ? '#define U8\n' : '') + `
 precision highp float;
 varying vec2 vUV;
@@ -103,26 +98,18 @@ float fbm(vec2 p){ float v=0.,a=.5; for(int i=0;i<4;i++){v+=vn(p)*a;p*=2.1;a*=.5
 void main(){
   vec2 uv = vUV;
   float h = 0.34;
-
-  // Primary barchan dune mounds — Gaussian ellipsoids, slightly asymmetric
   h += 0.27 * exp(-(pow((uv.x-0.27)*3.1,2.)+pow((uv.y-0.43)*1.9,2.)));
   h += 0.24 * exp(-(pow((uv.x-0.71)*3.6,2.)+pow((uv.y-0.27)*2.2,2.)));
   h += 0.21 * exp(-(pow((uv.x-0.53)*2.9,2.)+pow((uv.y-0.75)*1.8,2.)));
   h += 0.17 * exp(-(pow((uv.x-0.13)*4.2,2.)+pow((uv.y-0.66)*2.4,2.)));
   h += 0.15 * exp(-(pow((uv.x-0.84)*3.5,2.)+pow((uv.y-0.56)*2.1,2.)));
   h += 0.12 * exp(-(pow((uv.x-0.42)*5.0,2.)+pow((uv.y-0.12)*3.0,2.)));
-
-  // Slight inter-dune corridor depressions
   h -= 0.07 * exp(-(pow((uv.x-0.50)*3.8,2.)+pow((uv.y-0.50)*3.8,2.)));
   h -= 0.05 * exp(-(pow((uv.x-0.88)*5.0,2.)+pow((uv.y-0.15)*5.0,2.)));
-
-  // Surface ripple modulation
   h += 0.020 * sin(uv.x*21.+uv.y*4.2+1.1);
   h += 0.015 * sin(uv.y*16.-uv.x*2.8+0.7);
   h += 0.012 * fbm(uv*15.+2.1);
-
   h = clamp(h, 0.02, 0.97);
-
   #ifdef U8
     float t2 = h*255.; gl_FragColor = vec4(floor(t2)/255., fract(t2), 0., 1.);
   #else
@@ -130,26 +117,16 @@ void main(){
   #endif
 }`;
 
-// ═════════════════════════════════════════════════════════════════════════════
-// SIM SHADER — Angle-of-Repose granular physics (not a wave equation!)
-//
-// Each texel holds a sand height [0,1]. Every step:
-//   1. Compute height difference with all 8 neighbours.
-//   2. If |diff| > AOR threshold → sand flows from high to low cell.
-//      Cardinal AOR ≈ 0.024, diagonal AOR = 0.034 (×√2 for extra distance).
-//   3. Mouse: subtracts a gaussian trough + pushes sand forward.
-//   4. Wind: tiny aeolian drift in +X (very slow, periodic gusts).
-// ═════════════════════════════════════════════════════════════════════════════
 const SIM_SRC = (UINT8 ? '#define U8\n' : '') + `
 precision highp float;
 varying vec2 vUV;
 uniform sampler2D uS;
-uniform vec2  uTx;       // texel size (1/S, 1/S)
-uniform vec2  uM;        // mouse UV
-uniform vec2  uMv;       // mouse velocity (UV/frame)
-uniform float uR;        // interaction radius
-uniform float uStr;      // interaction strength
-uniform float uWind;     // aeolian wind [0,1]
+uniform vec2  uTx;
+uniform vec2  uM;
+uniform vec2  uMv;
+uniform float uR;
+uniform float uStr;
+uniform float uWind;
 
 #ifdef U8
   float dec(vec2 v){ return v.x + v.y/255.; }
@@ -159,11 +136,13 @@ uniform float uWind;     // aeolian wind [0,1]
   float H(vec2 u){ return texture2D(uS,u).r; }
 #endif
 
+// Random noise to vary the angle of repose slightly (simulates varying compaction)
+float hash(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }
+
 void main(){
   float h  = H(vUV);
   float tx = uTx.x, ty = uTx.y;
 
-  // Read all 8 neighbours
   float hN  = H(vUV+vec2( 0., ty));
   float hS  = H(vUV+vec2( 0.,-ty));
   float hE  = H(vUV+vec2( tx, 0.));
@@ -173,21 +152,18 @@ void main(){
   float hSE = H(vUV+vec2( tx,-ty));
   float hSW = H(vUV+vec2(-tx,-ty));
 
-  // ─── Angle-of-Repose flow ────────────────────────────────────────────────
-  // FR < 1/6 ≈ 0.167 guarantees numerical stability for all 8 neighbours
-  const float AOR  = 0.024;  // critical slope, cardinal
-  const float AOR2 = 0.034;  // critical slope, diagonal (AOR * sqrt(2))
-  const float FR   = 0.128;  // flow rate
+  // Tighter AOR and slightly lower flow rate for more dry, granular behavior
+  float localAorMod = (hash(vUV * 100.0) * 0.004) - 0.002;
+  float AOR  = 0.026 + localAorMod;  
+  float AOR2 = 0.036 + localAorMod;  
+  const float FR   = 0.11; 
 
   float flow = 0.;
-
-  // Cardinal (full weight)
   float dN=hN-h; flow+=sign(dN)*max(0.,abs(dN)-AOR )*FR;
   float dS=hS-h; flow+=sign(dS)*max(0.,abs(dS)-AOR )*FR;
   float dE=hE-h; flow+=sign(dE)*max(0.,abs(dE)-AOR )*FR;
   float dW=hW-h; flow+=sign(dW)*max(0.,abs(dW)-AOR )*FR;
 
-  // Diagonal (half weight — further apart)
   float dNE=hNE-h; flow+=sign(dNE)*max(0.,abs(dNE)-AOR2)*FR*0.5;
   float dNW=hNW-h; flow+=sign(dNW)*max(0.,abs(dNW)-AOR2)*FR*0.5;
   float dSE=hSE-h; flow+=sign(dSE)*max(0.,abs(dSE)-AOR2)*FR*0.5;
@@ -195,29 +171,23 @@ void main(){
 
   float newH = h + flow;
 
-  // ─── Aeolian wind transport (slow, +X dominant) ─────────────────────────
-  // Windward face gets slight influx; leeward face loses — creates dune migration
-  float wSrc = H(vUV - vec2(tx*1.5, ty*0.12));  // upwind
-  float wDst = H(vUV + vec2(tx*1.5, ty*0.12));  // downwind
+  float wSrc = H(vUV - vec2(tx*1.8, ty*0.15)); 
+  float wDst = H(vUV + vec2(tx*1.8, ty*0.15)); 
   float wDiff = wSrc - wDst;
-  newH += max(0., wDiff - AOR*0.55) * 0.048 * uWind;
+  newH += max(0., wDiff - AOR*0.5) * 0.05 * uWind;
 
-  // ─── Mouse interaction ───────────────────────────────────────────────────
   float dist  = length(vUV - uM);
   float touch = smoothstep(uR, 0., dist);
-
-  // Gaussian trough at cursor (scoop)
   newH -= touch * uStr;
 
-  // Push sand forward in movement direction
   float mvSpd = length(uMv);
   float hasMv = step(0.0012, mvSpd);
   vec2 mvDir  = uMv / max(mvSpd, 0.0001);
   vec2 toP    = vUV - uM;
   float along = dot(toP, mvDir);
   float aside = length(toP - along*mvDir);
-  float pushZ = smoothstep(uR*2.8, 0., aside) * smoothstep(uR*0.4, uR*2.2, along);
-  newH += pushZ * uStr * min(mvSpd*20., 1.) * 0.42 * hasMv;
+  float pushZ = smoothstep(uR*2.5, 0., aside) * smoothstep(uR*0.3, uR*2.0, along);
+  newH += pushZ * uStr * min(mvSpd*25., 1.) * 0.45 * hasMv;
 
   newH = clamp(newH, 0., 1.);
 
@@ -228,24 +198,6 @@ void main(){
   #endif
 }`;
 
-// ═════════════════════════════════════════════════════════════════════════════
-// RENDER SHADER — Golden-hour desert surface
-//
-// Pipeline:
-//   1. Sobel normals from height field
-//   2. Height-gradient palette: dark ochre → warm tan → bright gold → bleached peak
-//   3. Three-frequency grain texture + iron-streak colour variation
-//   4. Ambient occlusion (height²)
-//   5. Dual-ambient lighting: warm horizon + cool sky, afternoon sun
-//   6. Subsurface warmth at thin/backlit ridges
-//   7. Self-shadow on leeward faces
-//   8. Aeolian wind ripples: two-scale animated bedforms with proper shadow/highlight
-//   9. GGX specular (very rough sand) + rare sharp glint
-//  10. Laplacian caustic pools (light focused in hollows)
-//  11. Exposed cracked earth below thin sand
-//  12. Drifting dust motes (aeolian transport, drift in wind direction)
-//  13. Depth haze, vignette, filmic tone-map + warm grade
-// ═════════════════════════════════════════════════════════════════════════════
 const RENDER_SRC = (UINT8 ? '#define U8\n' : '') + `
 precision highp float;
 varying vec2 vUV;
@@ -269,150 +221,138 @@ float fbm(vec2 p){ float v=0.,a=.5; for(int i=0;i<5;i++){v+=vn(p)*a;p*=2.1;a*=.5
 
 float GGX(float ndh, float r){ float a=r*r*r*r,d=ndh*ndh*(a-1.)+1.; return a/(3.14159*d*d+1e-5); }
 
+// Quartz sparkle function
+float sparkle(vec2 uv, vec3 viewDir, vec3 normal, vec3 lightDir) {
+    vec3 halfV = normalize(viewDir + lightDir);
+    float NdotH = max(0.0, dot(normal, halfV));
+    // High frequency spatial hash mixed with specular reflection
+    float grain = hash(uv * 1200.0); 
+    float glint = pow(NdotH, 150.0 + grain * 200.0) * step(0.8, grain);
+    return glint * 4.0; 
+}
+
 void main(){
   vec2 uv = vUV;
   float t  = uTime;
 
-  // ─── Sobel normals (stronger scale for dramatic dune shading) ───────────
-  vec2 tx  = uTx * 2.6;
+  vec2 tx  = uTx * 2.2; 
   float hC  = H(uv);
   float hL  = H(uv-vec2(tx.x,0.));  float hR  = H(uv+vec2(tx.x,0.));
   float hU  = H(uv+vec2(0.,tx.y));  float hD  = H(uv-vec2(0.,tx.y));
   float hLU = H(uv+vec2(-tx.x, tx.y)); float hRU = H(uv+vec2(tx.x, tx.y));
   float hLD = H(uv+vec2(-tx.x,-tx.y)); float hRD = H(uv+vec2(tx.x,-tx.y));
 
-  const float NS = 7.5;
+  const float NS = 8.5; 
   float dX = (hRD+2.*hR+hRU-hLD-2.*hL-hLU)*NS/uAspect;
   float dY = (hLU+2.*hU+hRU-hLD-2.*hD-hRD)*NS;
   vec3 N   = normalize(vec3(-dX,-dY,1.));
   vec3 V   = vec3(0.,0.,1.);
 
-  // ─── Lighting ────────────────────────────────────────────────────────────
-  // Afternoon sun — low, from right-forward
-  vec3 sunDir = normalize(vec3(0.50, 0.26, 0.82));
+  vec3 sunDir = normalize(vec3(0.55, 0.20, 0.70));
   vec3 halfV  = normalize(V+sunDir);
   float sunD  = max(dot(N,sunDir),0.);
   float NdotH = max(dot(N,halfV),0.);
   float cosI  = max(dot(N,V),0.);
-  float F     = 0.025 + 0.065*pow(1.-cosI,4.); // low fresnel — dry sand
+  float F     = 0.02 + 0.05*pow(1.-cosI,5.); 
 
-  // ─── Sand colour palette ─────────────────────────────────────────────────
-  vec3 deepV  = vec3(0.20, 0.10, 0.03); // dark ochre valley
-  vec3 midS   = vec3(0.66, 0.48, 0.20); // warm tan mid-slope
-  vec3 slopeS = vec3(0.83, 0.68, 0.38); // golden slope
-  vec3 peakS  = vec3(0.95, 0.87, 0.60); // bleached crest
+  // Realistic sand palette (more muted, desaturated tones)
+  vec3 deepV  = vec3(0.24, 0.16, 0.10); 
+  vec3 midS   = vec3(0.60, 0.45, 0.28); 
+  vec3 slopeS = vec3(0.78, 0.65, 0.45); 
+  vec3 peakS  = vec3(0.92, 0.84, 0.68); 
 
   float hN = clamp(hC*2.5, 0., 1.);
-  vec3 col = mix(deepV,  midS,   smoothstep(0.,   0.40, hN));
-  col      = mix(col,    slopeS, smoothstep(0.40, 0.76, hN));
-  col      = mix(col,    peakS,  smoothstep(0.76, 1.0,  hN));
+  vec3 col = mix(deepV,  midS,   smoothstep(0.,   0.35, hN));
+  col      = mix(col,    slopeS, smoothstep(0.35, 0.70, hN));
+  col      = mix(col,    peakS,  smoothstep(0.70, 1.0,  hN));
 
-  // ─── Grain texture (3 frequencies, very fine) ────────────────────────────
-  float g1 = vn(uv*92.  + t*0.003);
-  float g2 = vn(uv*230. + t*0.0014 + 3.7);
-  float g3 = fbm(uv*25. + t*0.002  + 1.5);
-  col *= 0.77 + g1*0.30 + g2*0.13;
+  // Much finer grain noise to look like microscopic particles
+  float g1 = vn(uv*200.  + t*0.001);
+  float g2 = vn(uv*450. + 3.7);
+  float g3 = fbm(uv*50. + t*0.002);
+  col *= 0.85 + g1*0.15 + g2*0.08 + g3*0.05;
 
-  // Iron-oxide colour streaks (slight warm/cool variation)
-  float streak = fbm(uv*6.5 + t*0.001 + 5.1);
-  col = mix(col, col*vec3(1.07,0.93,0.78), streak*0.16);
+  float streak = fbm(uv*8.0 + 5.1);
+  col = mix(col, col*vec3(1.1,0.9,0.7), streak*0.12);
 
-  // ─── Ambient occlusion ───────────────────────────────────────────────────
-  float ao = clamp(hC*4.0+0.22, 0., 1.);
-  col *= mix(0.13, 1.0, ao*ao);
+  float ao = clamp(hC*4.5+0.15, 0., 1.);
+  col *= mix(0.2, 1.0, ao*ao);
 
-  // ─── Dual-ambient + sun ───────────────────────────────────────────────────
-  vec3 sunCol  = vec3(1.00, 0.83, 0.52);       // warm golden sun
-  vec3 skyAmb  = vec3(0.19, 0.27, 0.50);       // cool blue zenith
-  vec3 horzAmb = vec3(0.48, 0.28, 0.10);       // warm terra-cotta horizon
+  vec3 sunCol  = vec3(1.00, 0.88, 0.65);       
+  vec3 skyAmb  = vec3(0.25, 0.35, 0.55);       
+  vec3 horzAmb = vec3(0.55, 0.38, 0.20);       
 
   float upF    = dot(N, vec3(0.,0.,1.))*0.5+0.5;
-  vec3 ambient = mix(horzAmb, skyAmb, upF)*0.44;
-  col         *= ambient + sunCol*sunD*1.12;
+  vec3 ambient = mix(horzAmb, skyAmb, upF)*0.5;
+  col         *= ambient + sunCol*sunD*1.05;
 
-  // ─── Subsurface warmth (backlit thin ridge glow) ─────────────────────────
-  vec3 backL = normalize(vec3(-0.45,-0.22,0.72));
-  float sss  = pow(max(0.,dot(N,backL)),1.6) * max(0.,1.-hC*3.2);
-  col       += vec3(1.0,0.42,0.10)*sss*0.20;
+  // Enhanced subsurface scattering on sharp ridges
+  vec3 backL = normalize(vec3(-0.5,-0.2,0.6));
+  float sss  = pow(max(0.,dot(N,backL)),2.0) * max(0.,1.-hC*3.0);
+  col       += vec3(0.95,0.45,0.15)*sss*0.35;
 
-  // ─── Leeward self-shadow ──────────────────────────────────────────────────
-  float shade = clamp(1.-sunD,0.,1.) * (1.-ao) * 0.60;
-  col = mix(col, vec3(0.10,0.04,0.01), shade*0.44);
+  // Smoother self-shadow transitions
+  float shade = clamp(1.-sunD*1.5,0.,1.) * (1.-ao) * 0.7;
+  col = mix(col, vec3(0.08,0.05,0.04), shade*0.5);
 
-  // ─── Aeolian wind ripples (two-scale animated bedforms) ───────────────────
-  float rt  = t*0.052;
+  float rt  = t*0.04;
   vec2 rUV  = uv*vec2(uAspect,1.);
-  float ax  = rUV.x*0.87 + rUV.y*0.17; // dominant axis (+X with tilt)
+  float ax  = rUV.x*0.9 + rUV.y*0.1; 
 
-  // Large megaripples
-  float rL  = sin(ax*19. + fbm(uv*3.2+rt)*5.0 + rt);
-  rL        = pow(clamp(rL*.5+.5,0.,1.), 2.5);
-  // Fine micro-ripples
-  float rF  = sin(ax*60. + fbm(uv*9.5+rt*1.5)*3.2 + rt*1.7);
-  rF        = pow(clamp(rF*.5+.5,0.,1.), 2.0);
-  float rip = mix(rL, rF, 0.36);
+  float rL  = sin(ax*25. + fbm(uv*4.0+rt)*4.0 + rt);
+  rL        = pow(clamp(rL*.5+.5,0.,1.), 2.0);
+  float rF  = sin(ax*75. + fbm(uv*12.0+rt*1.2)*2.5 + rt*1.5);
+  rF        = pow(clamp(rF*.5+.5,0.,1.), 1.5);
+  float rip = mix(rL, rF, 0.4);
 
-  // Visibility: gentle slopes, mid-height only (not on steep avalanche faces)
   float slope = length(vec2(dX,dY));
-  float ripV  = clamp(1.-slope*2.6,0.,1.)
-              * smoothstep(0.07,0.38,hC)
-              * (1.-smoothstep(0.68,0.88,hC));
+  float ripV  = clamp(1.-slope*3.0,0.,1.) * smoothstep(0.05,0.3,hC) * (1.-smoothstep(0.75,0.95,hC));
 
-  // Ripple: shadow trough + sunlit face
-  col  = mix(col, col*0.80 + vec3(0.06,0.03,0.00), rip*ripV*0.40);
-  col += sunCol * rip * ripV * sunD * 0.25;
+  col  = mix(col, col*0.75 + vec3(0.05,0.03,0.02), rip*ripV*0.35);
+  col += sunCol * rip * ripV * sunD * 0.2;
 
-  // ─── Specular (very rough sand) ───────────────────────────────────────────
-  float rough = max(0.055, 0.08+(1.-hC)*0.09);
-  col += sunCol * GGX(NdotH, rough) * sunD * 0.055 * F;
-  // Rare compacted-patch glint (sharp, low probability)
-  col += sunCol * pow(NdotH, 115.) * sunD * 0.048 * clamp(hC*2.2-0.3,0.,1.);
+  float rough = max(0.08, 0.12+(1.-hC)*0.05);
+  col += sunCol * GGX(NdotH, rough) * sunD * 0.08 * F;
+  
+  // Real Quartz Glint Implementation
+  float glints = sparkle(uv, V, N, sunDir);
+  col += sunCol * glints * sunD * 0.08 * clamp(hC*3.0-0.2, 0., 1.);
 
-  // ─── Laplacian caustics (sunlight pooling in surface hollows) ─────────────
   float lap     = hU+hD+hL+hR - 4.*hC;
-  float caustic = pow(max(0.,-lap*9.),1.7)*1.5;
-  col += sunCol * caustic * sunD * 0.18;
+  float caustic = pow(max(0.,-lap*12.),1.5)*1.2;
+  col += sunCol * caustic * sunD * 0.15;
 
-  // ─── Exposed cracked earth (very sparse sand areas) ──────────────────────
-  float exposed = smoothstep(0.11,0.02,hC);
-  vec3 earthCol = vec3(0.11,0.055,0.018) * (0.85 + fbm(uv*20.)*0.30);
-  // Crack pattern
-  float crack   = smoothstep(0.46,0.50,abs(sin(uv.x*38.+uv.y*12.)*sin(uv.y*29.-uv.x*8.)));
-  earthCol      = mix(earthCol, earthCol*0.4, crack*0.60);
+  float exposed = smoothstep(0.08,0.01,hC);
+  vec3 earthCol = vec3(0.12,0.07,0.03) * (0.8 + fbm(uv*25.)*0.3);
+  float crack   = smoothstep(0.48,0.50,abs(sin(uv.x*45.+uv.y*15.)*sin(uv.y*35.-uv.x*10.)));
+  earthCol      = mix(earthCol, earthCol*0.3, crack*0.7);
   col           = mix(col, earthCol, exposed);
 
-  // ─── Drifting dust motes (aeolian transport particles) ───────────────────
-  vec2 dustUV = uv*vec2(uAspect*25.,25.) + vec2(t*0.024, t*0.006);
+  vec2 dustUV = uv*vec2(uAspect*25.,25.) + vec2(t*0.03, t*0.008);
   vec2 dsi    = floor(dustUV);
   vec2 dsf    = fract(dustUV);
   float dh1   = hash(dsi);
   float dh2   = hash(dsi+vec2(47.,0.));
   float dh3   = hash(dsi+vec2(0.,91.));
-  float mR    = 0.032+dh1*0.055;
-  float mDist = length(dsf-vec2(0.22+dh1*0.56, 0.18+dh2*0.64));
-  float mote  = smoothstep(mR, mR*0.12, mDist)
-              * step(dh3,0.065)          // ~6.5% of cells have a mote
-              * smoothstep(0.42,0.06,hC); // only over thin/empty sand
-  col += vec3(0.84,0.62,0.30)*mote*0.68;
+  float mR    = 0.025+dh1*0.04;
+  float mDist = length(dsf-vec2(0.2+dh1*0.6, 0.2+dh2*0.6));
+  float mote  = smoothstep(mR, mR*0.1, mDist) * step(dh3,0.08) * smoothstep(0.35,0.05,hC); 
+  col += vec3(0.9,0.7,0.4)*mote*0.5;
 
-  // ─── Atmospheric depth haze (dust-laden air in hollows) ──────────────────
-  float haze = (1.-hC)*(1.-sunD)*0.30;
-  col  = mix(col, vec3(0.50,0.33,0.13), haze*0.26);
+  float haze = (1.-hC)*(1.-sunD)*0.25;
+  col  = mix(col, vec3(0.55,0.40,0.25), haze*0.3);
 
-  // ─── Vignette ─────────────────────────────────────────────────────────────
   vec2 vd = (vUV*2.-1.)*vec2(uAspect,1.);
-  col    *= clamp(1.-dot(vd,vd)*0.062, 0., 1.);
+  col    *= clamp(1.-dot(vd,vd)*0.08, 0., 1.);
 
-  // ─── Filmic tone-map + warm grade ────────────────────────────────────────
-  col  = col*(1.+col*0.24)/(col+0.80)*1.07;
+  col  = col*(1.+col*0.2)/(col+0.85)*1.1;
   col  = pow(max(col,vec3(0.)), vec3(1./2.2));
-  col.r = min(col.r*1.045, 1.);
-  col.b *= 0.88; // desaturate blue for desert warmth
+  col.r = min(col.r*1.02, 1.);
+  col.b *= 0.92; 
 
   gl_FragColor = vec4(col, 1.);
 }`;
 
-// ─── Shader compilation ────────────────────────────────────────────────────
 function mkSh(type, src){
   const s = gl.createShader(type);
   gl.shaderSource(s, src); gl.compileShader(s);
@@ -440,7 +380,6 @@ try {
   throw e;
 }
 
-// ─── Quad geometry ────────────────────────────────────────────────────────
 const qb = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, qb);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
@@ -451,11 +390,9 @@ function bindQ(prog){
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 }
 
-// ─── FBO factory (starts at zero — INIT shader writes dune heights) ────────
 function mkFBO(){
   const n   = S * S * 4;
   const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
-  // Allocate empty; INIT shader will populate fboA immediately after
   const emptyData = UINT8 ? new Uint8Array(n)
                   : (FTYPE === gl.FLOAT ? new Float32Array(n) : new Uint16Array(n));
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, S, S, 0, gl.RGBA, FTYPE, emptyData);
@@ -471,7 +408,6 @@ function mkFBO(){
 }
 let fboA = mkFBO(), fboB = mkFBO();
 
-// Run INIT shader once → writes procedural dune landscape into fboA
 (function initDunes(){
   gl.bindFramebuffer(gl.FRAMEBUFFER, fboA.fbo);
   gl.viewport(0, 0, S, S);
@@ -481,7 +417,6 @@ let fboA = mkFBO(), fboB = mkFBO();
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 })();
 
-// ─── Input ────────────────────────────────────────────────────────────────
 const ptr = {x:.5, y:.5, px:.5, py:.5, vx:0, vy:0, active:false};
 let gone = false;
 function toUV(cx,cy){ return {x:cx/CW, y:1.-cy/CH}; }
@@ -506,7 +441,6 @@ canvas.addEventListener('touchstart', e=>{e.preventDefault();onDown(e);},{passiv
 canvas.addEventListener('touchmove',  e=>{e.preventDefault();onMove(e);},{passive:false});
 canvas.addEventListener('touchend',   e=>{e.preventDefault();onUp();  },{passive:false});
 
-// ─── Simulation step ─────────────────────────────────────────────────────
 function simulate(src, dst, applyMouse){
   gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
   gl.viewport(0, 0, S, S);
@@ -519,16 +453,13 @@ function simulate(src, dst, applyMouse){
   gl.uniform2f(u.uM,   ptr.x, ptr.y);
   gl.uniform2f(u.uMv,  ptr.vx, ptr.vy);
   gl.uniform1f(u.uR,   0.046);
-  // Strength: scales with drag speed for natural feel
   const spd = Math.hypot(ptr.vx, ptr.vy);
   const str = (applyMouse && ptr.active) ? Math.min(0.09 + spd*17., 0.55) : 0.;
   gl.uniform1f(u.uStr,  str);
-  // Wind: slow sinusoidal gust — makes dunes slowly migrate
   gl.uniform1f(u.uWind, Math.max(0., Math.sin(time * 0.16)*0.65 + 0.12));
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-// ─── Render ───────────────────────────────────────────────────────────────
 let time = 0;
 function render(src){
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -544,9 +475,6 @@ function render(src){
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-// ─── Main loop ────────────────────────────────────────────────────────────
-// 5 AOR passes per frame → fast avalanche convergence after disturbance.
-// Mouse is only applied on pass 0 to avoid double-displacement artefacts.
 function frame(now){
   requestAnimationFrame(frame);
   time = now * 0.001;
